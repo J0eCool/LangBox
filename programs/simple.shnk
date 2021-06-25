@@ -1,0 +1,7 @@
+fn foo a b {
+    print "foo: " a " " b
+    return a + b
+}
+
+foo 2 3
+foo 4 5

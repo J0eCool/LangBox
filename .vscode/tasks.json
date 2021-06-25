@@ -1,0 +1,26 @@
+{
+    // See https://go.microsoft.com/fwlink/?LinkId=733558
+    // for the documentation about the tasks.json format
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Tests",
+            "type": "shell",
+            "command": "nim c -r -o:out/test test/test_parser.nim",
+            "problemMatcher": [],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        }, {
+            "label": "Shenk",
+            "type": "shell",
+            "command": "nim c -r -o:out/shenk src/shenk.nim -- programs/simple.shnk",
+            "problemMatcher": [],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        }
+    ],
+}
