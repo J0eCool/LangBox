@@ -3,32 +3,9 @@
 import sequtils
 import strutils
 
-type
-  Location* = tuple[row, col: int]
-  TokenKind* = enum
-    tSpace
-    tLine
-    tNumber
-    tIdentifier
-    tString
-    tBraceOpen
-    tBraceClose
-    tEof
-  BraceKind* = enum
-    bParen
-    bCurly
-    bSquare
-    bIndex # used for parenStack tracking
-  Token* = object
-    case kind*: TokenKind
-    of tNumber, tIdentifier, tString:
-      value*: string
-    of tBraceOpen, tBraceClose:
-      brace*: BraceKind
-    else:
-      discard
-    location*: Location
+import shiv_lexer
 
+type
   SExprKind* = enum
     sAtom
     sList
@@ -47,84 +24,6 @@ func ssx*(elems: seq[SExpr]): SExpr =
   SExpr(kind: sList, elems: elems)
 func ss*(elems: varargs[SExpr, sa]): SExpr =
   ssx(@elems)
-
-func isIdentifierChar(c: char): bool =
-  c == '_' or c.isAlphaNumeric()
-
-iterator lex*(input: string): Token =
-  var i = 0
-  var row = 0
-  var col = 0
-
-  while i < input.len:
-    let start = i
-    let loc = (row, col)
-    let c = input[i]
-    var next: Token
-
-    i += 1
-    case c
-    of '\n': next = Token(kind: tLine)
-    of ' ', '\r', '\t':
-      while i < input.len and input[i] in " \r\t":
-        i += 1
-      next = Token(kind: tSpace)
-    of '(': next = Token(kind: tBraceOpen, brace: bParen)
-    of ')': next = Token(kind: tBraceClose, brace: bParen)
-    of '{': next = Token(kind: tBraceOpen, brace: bCurly)
-    of '}': next = Token(kind: tBraceClose, brace: bCurly)
-    of '[': next = Token(kind: tBraceOpen, brace: bSquare)
-    of ']': next = Token(kind: tBraceClose, brace: bSquare)
-    of '"':
-      var str = ""
-      while i < input.len and input[i] != '"':
-        str &= input[i]
-        i += 1
-      i += 1
-      next = Token(kind: tString, value: str)
-    of ';':
-      while i < input.len and input[i] != '\n':
-        i += 1
-    else:
-      var ident = $c
-      let breakSet = "(){}[] \n\r\t"
-      if c.isDigit():
-        var sawDot = false
-        while i < input.len:
-          if input[i] in breakSet: break
-          if input[i] == '.':
-            if sawDot:
-              break
-            sawDot = true
-            ident &= input[i]
-          elif not input[i].isDigit():
-            break
-          else:
-            # is digit
-            ident &= input[i]
-          i += 1
-        if ident[^1] == '.':
-          # Ignore trailing decimal, e.g. "1." -> ["1", "."]
-          ident = ident[0..^2]
-          i -= 1
-        next = Token(kind: tNumber, value: ident)
-      else:
-        let isAlpha = c.isIdentifierChar()
-        while i < input.len:
-          if isAlpha != input[i].isIdentifierChar(): break
-          if input[i] in breakSet: break
-          ident &= input[i]
-          i += 1
-        next = Token(kind: tIdentifier, value: ident)
-    next.location = loc
-    yield next
-
-    col += i - start
-    if c == '\n':
-      row += 1
-      col = 0
-
-  yield Token(kind: tEof)
 
 type Stack[T] = distinct seq[T]
 func newStack*[T](): Stack[T] =
@@ -244,6 +143,7 @@ func `$`*(sexpr: SExpr): string =
   of sList:
     "(" & sexpr.elems.join(" ") & ")"
 
+# A SExpr is complex if it is a list that contains at least one list as an element
 func isComplex(sexpr: SExpr): bool =
   if sexpr.kind == sAtom:
     false
