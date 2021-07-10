@@ -25,6 +25,13 @@ func ssx*(elems: seq[SExpr]): SExpr =
 func ss*(elems: varargs[SExpr, sa]): SExpr =
   ssx(@elems)
 
+func len*(sexpr: SExpr): int =
+  assert sexpr.kind == sList
+  sexpr.elems.len
+func `[]`*(sexpr: SExpr, idx: int): SExpr =
+  assert sexpr.kind == sList
+  sexpr.elems[idx]
+
 type Stack[T] = distinct seq[T]
 func newStack*[T](): Stack[T] =
   Stack[T](@[])

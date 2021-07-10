@@ -13,19 +13,29 @@ import shiv_parser
 
 type
   ExprKind = enum
-    exLiteral
+    exNumber
+    exString
     exIdentifier
     exCall
   Expr = object
     case kind: ExprKind
-    of exLiteral:
-      val: float
+    of exNumber:
+      num: float
+    of exString:
+      str: string
     of exIdentifier:
       name: string
     of exCall:
       callee: string
       args: seq[Expr]
+
+  Func = object
+    name: string
+    args: seq[string]
+    body: seq[Expr]
+
   Ast = object
+    funcs: seq[Func]
     exprs: seq[Expr]
 
 #-------------------------------------------------------------------------------
@@ -34,21 +44,28 @@ type
 proc parseExpr*(sexpr: SExpr): Expr =
   if sexpr.kind == sAtom:
     if sexpr.name[0].isDigit():
-      Expr(kind: exLiteral, val: parseFloat(sexpr.name))
+      Expr(kind: exNumber, num: parseFloat(sexpr.name))
+    elif sexpr.name[0] == '"':
+      Expr(kind: exString, str: sexpr.name)
     else:
       Expr(kind: exIdentifier, name: sexpr.name)
   else:
-    assert sexpr.elems[0].kind == sAtom
-    Expr(kind: exCall, callee: sexpr.elems[0].name, args: sexpr.elems[1..^1].mapIt(parseExpr(it)))
+    assert sexpr[0].kind == sAtom
+    Expr(kind: exCall, callee: sexpr[0].name, args: sexpr.elems[1..^1].mapIt(parseExpr(it)))
 
-proc parse*(topLevel: SExpr): Ast =
+proc parseFunc*(sexpr: SExpr): Func =
+  assert sexpr.len >= 3
+  assert sexpr[0] == sa("fn")
+  result.name = sexpr[1].name
+
+proc parseProgram*(topLevel: SExpr): Ast =
   assert topLevel.kind == sList
   for sexpr in topLevel.elems:
     assert sexpr.kind == sList
-    assert sexpr.elems.len != 0
-    let head = sexpr.elems[0]
+    assert sexpr.len != 0
+    let head = sexpr[0]
     if head == sa("fn"):
-      discard
+      result.funcs.add parseFunc(sexpr)
     else:
       result.exprs.add parseExpr(sexpr)
 
@@ -110,14 +127,14 @@ proc doCompile(opt: Options): int =
     file.close()
 
   log "Parsing Sexprs..."
-  var sexpr = shiv_parser.parse(contents)
+  var sexpr = parse(contents)
   if opt.debug:
     let file = open(tempDir / "debug_parse_sexpr.shv", fmWrite)
     for elem in sexpr.elems:
       file.writeLine(pretty(elem))
     file.close()
 
-  var ast = parse(sexpr)
+  var ast = parseProgram(sexpr)
   echo ast
 
   return 0
