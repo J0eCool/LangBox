@@ -1,0 +1,31 @@
+// Idea here is that each entity is described in terms of what it is, and then
+// overrides the behavior provided by the base type
+
+// Assume this is paired with a game engine that has specific render/update hooks
+
+entity Mario :< Sprite {
+    input: InputHandler
+    speed: float = 100
+
+    render {
+        // wouldn't be needed, but to override default behavior
+        super // call the parent's render function
+    }
+
+    update (dt: float) {
+        var vel = Vec2
+        whenHeld input {
+            // here this creates an object that responds to `left` or `right`
+            // methods, which `whenHeld` will invoke as appropriate
+            // might need to do something with syntax to make this saner to parse but eh
+            left {
+                changeX vel (- speed)
+            }
+            right {
+                changeX vel speed
+            }
+        }
+        // just polish-notation everything until I get sick of it
+        += position (* vel dt)
+    }
+}
