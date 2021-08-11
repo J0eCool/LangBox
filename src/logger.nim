@@ -2,6 +2,8 @@ import os
 
 var logFile = stdout
 
+type Logger* = proc(msgs: varargs[string, `$`])
+
 proc closeLog*() =
   if logFile == nil: return
   logFile.close()
@@ -24,6 +26,6 @@ proc logKind*(kind: string, msgs: varargs[string, `$`]) =
     logFile.write(msg)
   logFile.writeLine("")
 
-proc logger*(kind: string): proc(msgs: varargs[string, `$`]) =
+proc logger*(kind: string): Logger =
   return proc(msgs: varargs[string, `$`]) =
     logKind(kind, msgs)

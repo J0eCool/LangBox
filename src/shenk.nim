@@ -1,12 +1,11 @@
 # Driver for Shenk mini-language
 
 import os
-import sequtils
+# import sequtils
 import strutils
 
 import logger
 import shiv_lexer
-import shiv_parser
 
 #-------------------------------------------------------------------------------
 # Shenk AST
@@ -41,34 +40,102 @@ type
 #-------------------------------------------------------------------------------
 # Shenk parser
 
-proc parseExpr*(sexpr: SExpr): Expr =
-  if sexpr.kind == sAtom:
-    if sexpr.name[0].isDigit():
-      Expr(kind: exNumber, num: parseFloat(sexpr.name))
-    elif sexpr.name[0] == '"':
-      Expr(kind: exString, str: sexpr.name)
+type
+  Parser = object
+    tokens: seq[Token]
+    index: int
+    log: Logger
+
+proc error(parser: Parser, args: varargs[string, `$`]) =
+  parser.log "[Parse Error]:", args.join("")
+  echo "[Parse Error]: ", args.join("")
+  quit(1)
+proc errorIf(parser: Parser, cond: bool, args: varargs[string, `$`]) =
+  if cond:
+    parser.error(args)
+
+func peek(parser: Parser): Token =
+  parser.tokens[parser.index]
+proc pop(parser: var Parser): Token =
+  result = parser.peek()
+  parser.log("popping ", result)
+  parser.index += 1
+
+# consumes token that is expected to be there
+proc expect(parser: var Parser, val: string) =
+  let tok = parser.pop()
+  parser.errorIf(tok != ident(val), "Expected the identifier ", val, ", but got ", tok)
+proc expect(parser: var Parser, kind: TokenKind) =
+  let tok = parser.pop()
+  parser.errorIf(tok.kind != kind, "Expected a token of kind ", kind, ", but got ", tok)
+proc expect(parser: var Parser, expected: Token) =
+  let tok = parser.pop()
+  parser.errorIf(tok != expected, "Expected ", expected, ", but got ", tok)
+
+func isDone(parser: Parser): bool =
+  parser.index >= len(parser.tokens) or parser.peek() == token(tEof)
+
+# eliminate any non-significant whitespace
+proc space(parser: var Parser) =
+  while parser.peek().kind == tSpace:
+    discard parser.pop()
+# eliminate any whitespace; used where no space is ever significant
+proc blankLines(parser: var Parser) =
+  while parser.peek.kind in {tSpace, tLine}:
+    discard parser.pop()
+proc newline(parser: var Parser) =
+  parser.space()
+  parser.expect(tLine)
+
+# checks what the next token is without consuming it; also skips any whitespace
+proc nextIs(parser: var Parser, val: string): bool =
+  # convenience method for identifiers
+  parser.space()
+  parser.peek() == ident(val)
+proc nextIs(parser: var Parser, kind: TokenKind): bool =
+  parser.space()
+  parser.peek().kind == kind
+proc nextIs(parser: var Parser, expected: Token): bool =
+  parser.space()
+  parser.peek() == expected
+
+proc stmtList(parser: var Parser): seq[Expr] =
+  parser.expect(openBrace(bCurly))
+  parser.newline()
+  while true:
+    parser.blankLines()
+    let tok = parser.peek()
+    if tok == closeBrace(bCurly):
+      break
+    while not parser.nextIs(tLine):
+      # todo: parse exprs, yeesh
+      discard parser.pop()
+    parser.newline()
+  @[]
+
+proc identifier(parser: var Parser): string =
+  parser.space()
+  let tok = parser.pop()
+  parser.errorIf(tok.kind != tIdentifier, "Expected an identifier, but got ", tok)
+  tok.value
+proc function(parser: var Parser): Func =
+  parser.log("function declaration")
+  parser.expect("fn")
+  result.name = parser.identifier()
+  while not parser.nextIs(openBrace(bCurly)):
+    result.args.add parser.identifier()
+  result.body = parser.stmtList()
+
+proc parseProgram*(input: string): Ast =
+  let tokens = lexEager(input)
+  var parser = Parser(tokens: tokens, log: logger("parser"))
+  while not parser.isDone():
+    parser.log("top level: ", parser.peek())
+    if parser.nextIs("fn"):
+      result.funcs.add parser.function()
     else:
-      Expr(kind: exIdentifier, name: sexpr.name)
-  else:
-    assert sexpr[0].kind == sAtom
-    Expr(kind: exCall, callee: sexpr[0].name, args: sexpr.elems[1..^1].mapIt(parseExpr(it)))
-
-proc parseFunc*(sexpr: SExpr): Func =
-  assert sexpr.len >= 3
-  assert sexpr[0] == sa("fn")
-  result.name = sexpr[1].name
-
-proc parseProgram*(topLevel: SExpr): Ast =
-  assert topLevel.kind == sList
-  for sexpr in topLevel.elems:
-    assert sexpr.kind == sList
-    assert sexpr.len != 0
-    let head = sexpr[0]
-    if head == sa("fn"):
-      result.funcs.add parseFunc(sexpr)
-    else:
-      result.exprs.add parseExpr(sexpr)
-
+      # just ignore it i'm sure it's fine
+      discard parser.pop()
 
 #-------------------------------------------------------------------------------
 # Arg parser
@@ -107,7 +174,7 @@ func parseOptions(args: seq[string]): Options =
 # Main
 
 proc doCompile(opt: Options): int =
-  let log = logger("shivc main")
+  let log = logger("shenk main")
   log "Parsed options: ", opt
   let filename = opt.input
   assert filename != "", "Must specify an input filename"
@@ -126,15 +193,16 @@ proc doCompile(opt: Options): int =
       file.writeLine($token)
     file.close()
 
-  log "Parsing Sexprs..."
-  var sexpr = parse(contents)
-  if opt.debug:
-    let file = open(tempDir / "debug_parse_sexpr.shv", fmWrite)
-    for elem in sexpr.elems:
-      file.writeLine(pretty(elem))
-    file.close()
+  # log "Parsing Sexprs..."
+  # var sexpr = parse(contents)
+  # if opt.debug:
+  #   let file = open(tempDir / "debug_parse_sexpr.shv", fmWrite)
+  #   for elem in sexpr.elems:
+  #     file.writeLine(pretty(elem))
+  #   file.close()
 
-  var ast = parseProgram(sexpr)
+  # var ast = parseProgram(sexpr)
+  var ast = parseProgram(contents)
   echo ast
 
   return 0

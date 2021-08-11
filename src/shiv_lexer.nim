@@ -31,10 +31,32 @@ type
 func isIdentifierChar(c: char): bool =
   c == '_' or c.isAlphaNumeric()
 
+func `==`*(a, b: Token): bool =
+  if a.kind != b.kind:
+    false
+  else:
+    case a.kind
+    of tNumber, tIdentifier, tString:
+      a.value == b.value
+    of tBraceOpen, tBraceClose:
+      a.brace == b.brace
+    else:
+      true
+
+# helper token constructors to query equality
+func ident*(name: string): Token =
+  Token(kind: tIdentifier, value: name)
+func token*(kind: TokenKind): Token =
+  Token(kind: kind)
+func openBrace*(kind: BraceKind): Token =
+  Token(kind: tBraceOpen, brace: kind)
+func closeBrace*(kind: BraceKind): Token =
+  Token(kind: tBraceClose, brace: kind)
+
 iterator lex*(input: string): Token =
   var i = 0
-  var row = 0
-  var col = 0
+  var row = 1
+  var col = 1
 
   while i < input.len:
     let start = i
@@ -105,3 +127,7 @@ iterator lex*(input: string): Token =
       col = 0
 
   yield Token(kind: tEof)
+
+func lexEager*(input: string): seq[Token] =
+  for tok in lex(input):
+    result.add tok
