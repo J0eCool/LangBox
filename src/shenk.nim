@@ -28,14 +28,23 @@ type
       callee: string
       args: seq[Expr]
 
+  StmtKind = enum
+    stCall
+  Stmt = object
+    case kind: StmtKind
+    of stCall:
+      ex: Expr
+    else:
+      discard
+
   Func = object
     name: string
     args: seq[string]
-    body: seq[Expr]
+    body: seq[Stmt]
 
   Ast = object
     funcs: seq[Func]
-    exprs: seq[Expr]
+    stmts: seq[Stmt]
 
 #-------------------------------------------------------------------------------
 # Shenk parser
@@ -134,9 +143,9 @@ proc callExpr(parser: var Parser): Expr =
     args.add parser.expr()
   Expr(kind: exCall, callee: callee, args: args)
 
-proc stmt(parser: var Parser): Expr =
-  parser.callExpr()
-proc stmtList(parser: var Parser): seq[Expr] =
+proc stmt(parser: var Parser): Stmt =
+  Stmt(kind: stCall, ex: parser.callExpr())
+proc stmtList(parser: var Parser): seq[Stmt] =
   parser.expect(openBrace(bCurly))
   parser.newline()
   while true:
@@ -165,7 +174,7 @@ proc parseProgram*(input: string): Ast =
     if parser.nextIs("fn"):
       result.funcs.add parser.function()
     else:
-      result.exprs.add parser.stmt()
+      result.stmts.add parser.stmt()
     parser.blankLines()
 
 #-------------------------------------------------------------------------------
