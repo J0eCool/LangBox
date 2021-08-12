@@ -47,6 +47,50 @@ type
     stmts: seq[Stmt]
 
 #-------------------------------------------------------------------------------
+# Shenk AST pretty-printer
+
+proc pretty(ex: Expr): string =
+  case ex.kind
+  of exNumber:
+    $ex.num
+  of exString:
+    '"' & ex.str & '"'
+  of exIdentifier:
+    ex.name
+  of exCall:
+    var args = ""
+    for arg in ex.args:
+      args &= " " & arg.pretty()
+    "(" & ex.callee & args & ")"
+proc pretty(st: Stmt): string =
+  "Stmt " & st.ex.pretty()
+
+proc pprint(log: Logger, st: Stmt) =
+  log st.pretty()
+proc pprint(log: Logger, fn: Func) =
+  log "Func ", fn.name
+  var args = ""
+  for arg in fn.args:
+    if args != "":
+      args &= ", "
+    args &= arg
+  log "Args: ", args
+  log "Body:"
+  for st in fn.body:
+    log "  ", st.pretty()
+
+proc pprint(log: Logger, ast: Ast) =
+  log "Functions"
+  log ""
+  for fn in ast.funcs:
+    pprint(log, fn)
+  log ""
+  log "Top-level statements"
+  log ""
+  for st in ast.stmts:
+    pprint(log, st)
+
+#-------------------------------------------------------------------------------
 # Shenk parser
 
 type
@@ -67,7 +111,7 @@ func peek(parser: Parser): Token =
   parser.tokens[parser.index]
 proc pop(parser: var Parser): Token =
   result = parser.peek()
-  parser.log("popping ", result)
+  parser.log "popping ", result
   parser.index += 1
 
 # consumes token that is expected to be there
@@ -157,7 +201,7 @@ proc stmtList(parser: var Parser): seq[Stmt] =
   parser.expect(closeBrace(bCurly))
 
 proc function(parser: var Parser): Func =
-  parser.log("function declaration")
+  parser.log "function declaration"
   parser.expect("fn")
   result.name = parser.identifier()
   while not parser.nextIs(openBrace(bCurly)):
@@ -170,12 +214,14 @@ proc parseProgram*(input: string): Ast =
 
   parser.blankLines()
   while not parser.isDone():
-    parser.log("top level: ", parser.peek())
+    parser.log "top level: ", parser.peek()
     if parser.nextIs("fn"):
       result.funcs.add parser.function()
     else:
       result.stmts.add parser.stmt()
     parser.blankLines()
+
+  parser.log "Done"
 
 #-------------------------------------------------------------------------------
 # Arg parser
@@ -243,7 +289,7 @@ proc doCompile(opt: Options): int =
 
   # var ast = parseProgram(sexpr)
   var ast = parseProgram(contents)
-  echo ast
+  pprint(log, ast)
 
   return 0
 
