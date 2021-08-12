@@ -145,6 +145,7 @@ proc stmtList(parser: var Parser): seq[Expr] =
       break
     result.add parser.stmt()
     parser.newline()
+  parser.expect(closeBrace(bCurly))
 
 proc function(parser: var Parser): Func =
   parser.log("function declaration")
@@ -157,13 +158,15 @@ proc function(parser: var Parser): Func =
 proc parseProgram*(input: string): Ast =
   let tokens = lexEager(input)
   var parser = Parser(tokens: tokens, log: logger("parser"))
+
+  parser.blankLines()
   while not parser.isDone():
     parser.log("top level: ", parser.peek())
     if parser.nextIs("fn"):
       result.funcs.add parser.function()
     else:
-      # just ignore it i'm sure it's fine
-      discard parser.pop()
+      result.exprs.add parser.stmt()
+    parser.blankLines()
 
 #-------------------------------------------------------------------------------
 # Arg parser
