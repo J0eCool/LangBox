@@ -47,7 +47,7 @@ type
     log: Logger
 
 proc error(parser: Parser, args: varargs[string, `$`]) =
-  parser.log "[Parse Error]:", args.join("")
+  parser.log "[Parse Error]: ", args.join("")
   echo "[Parse Error]: ", args.join("")
   quit(1)
 proc errorIf(parser: Parser, cond: bool, args: varargs[string, `$`]) =
@@ -99,25 +99,53 @@ proc nextIs(parser: var Parser, expected: Token): bool =
   parser.space()
   parser.peek() == expected
 
-proc stmtList(parser: var Parser): seq[Expr] =
-  parser.expect(openBrace(bCurly))
-  parser.newline()
-  while true:
-    parser.blankLines()
-    let tok = parser.peek()
-    if tok == closeBrace(bCurly):
-      break
-    while not parser.nextIs(tLine):
-      # todo: parse exprs, yeesh
-      discard parser.pop()
-    parser.newline()
-  @[]
+# checks the next token kind against a set of options
+proc nextIn(parser: var Parser, kinds: set[TokenKind]): bool =
+  parser.space()
+  parser.peek().kind in kinds
 
 proc identifier(parser: var Parser): string =
   parser.space()
   let tok = parser.pop()
   parser.errorIf(tok.kind != tIdentifier, "Expected an identifier, but got ", tok)
   tok.value
+
+proc callExpr(parser: var Parser): Expr
+proc expr(parser: var Parser): Expr =
+  if parser.nextIs(tNumber):
+    result = Expr(kind: exNumber, num: parseFloat(parser.pop().value))
+  elif parser.nextIs(tString):
+    result = Expr(kind: exString, str: parser.pop().value)
+  elif parser.nextIs(tIdentifier):
+    result = Expr(kind: exIdentifier, name: parser.pop().value)
+  elif parser.nextIs(openBrace(bParen)):
+    discard parser.pop()
+    result = parser.callExpr()
+    parser.expect(closeBrace(bParen))
+  else:
+    parser.error("unknown expr")
+
+# expr that is guaranteed to be a function call, e.g. for use in stmts
+proc callExpr(parser: var Parser): Expr =
+  parser.space()
+  let callee = parser.identifier()
+  var args: seq[Expr]
+  while not parser.nextIn({tLine, tBraceClose}):
+    args.add parser.expr()
+  Expr(kind: exCall, callee: callee, args: args)
+
+proc stmt(parser: var Parser): Expr =
+  parser.callExpr()
+proc stmtList(parser: var Parser): seq[Expr] =
+  parser.expect(openBrace(bCurly))
+  parser.newline()
+  while true:
+    parser.blankLines()
+    if parser.nextIs(closeBrace(bCurly)):
+      break
+    result.add parser.stmt()
+    parser.newline()
+
 proc function(parser: var Parser): Func =
   parser.log("function declaration")
   parser.expect("fn")

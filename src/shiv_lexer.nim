@@ -67,8 +67,9 @@ iterator lex*(input: string): Token =
     i += 1
     case c
     of '\n': next = Token(kind: tLine)
-    of ' ', '\r', '\t':
-      while i < input.len and input[i] in " \r\t":
+    of '\r': continue # just ignore these damn things
+    of ' ', '\t':
+      while i < input.len and input[i] in " \t":
         i += 1
       next = Token(kind: tSpace)
     of '(': next = Token(kind: tBraceOpen, brace: bParen)
@@ -124,7 +125,7 @@ iterator lex*(input: string): Token =
     col += i - start
     if c == '\n':
       row += 1
-      col = 0
+      col = 1
 
   yield Token(kind: tEof)
 
