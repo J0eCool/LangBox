@@ -32,9 +32,10 @@ type
 
   StmtKind = enum
     stCall
+    stReturn
   Stmt = object
     case kind: StmtKind
-    of stCall:
+    of stCall, stReturn:
       ex: Expr
 
   Func = object
@@ -63,7 +64,11 @@ proc pretty(ex: Expr): string =
       args &= " " & arg.pretty()
     "(" & ex.callee & args & ")"
 proc pretty(st: Stmt): string =
-  "Stmt " & st.ex.pretty()
+  case st.kind
+  of stCall:
+    "Call " & st.ex.pretty()
+  of stReturn:
+    "Return " & st.ex.pretty()
 
 proc pprint(log: Logger, st: Stmt) =
   log st.pretty()
@@ -188,6 +193,11 @@ proc callExpr(parser: var Parser): Expr =
   Expr(kind: exCall, callee: callee, args: args)
 
 proc stmt(parser: var Parser): Stmt =
+  if parser.nextIs(tIdentifier):
+    case parser.peek().value
+    of "return":
+      discard parser.pop()
+      return Stmt(kind: stReturn, ex: parser.callExpr())
   Stmt(kind: stCall, ex: parser.callExpr())
 proc stmtList(parser: var Parser): seq[Stmt] =
   parser.expect(openBrace(bCurly))
@@ -244,10 +254,13 @@ type
 
   Interpreter = object
     ast: Ast
-    scopes: Stack[Scope]
-
     # easy lookup for funcs
     funcs: Table[string, Func]
+
+    # Runtime state
+    scopes: Stack[Scope]
+    retVal: Value
+    toExec: Stack[seq[Stmt]]
 
 func toString(val: Value): string =
   case val.kind
@@ -303,9 +316,6 @@ proc eval(ctx: var Interpreter, ex: Expr): Value =
     of "+":
       assert args.len == 2
       Value(kind: tyNum, num: args[0].num + args[1].num)
-    of "return":
-      # todo
-      Value(kind: tyVoid)
     else:
       # user funcs
       let fn = ctx.funcs[ex.callee]
@@ -314,6 +324,9 @@ proc eval(ctx: var Interpreter, ex: Expr): Value =
 proc exec(ctx: var Interpreter, st: Stmt) =
   case st.kind
   of stCall:
+    discard ctx.eval(st.ex)
+  of stReturn:
+    # todo
     discard ctx.eval(st.ex)
 
 proc interpret(ast: Ast) =

@@ -1,8 +1,8 @@
 fn foo a b {
     print "foo: " a " " b
-    return (+ a b)
+    return + a b
 }
 
 print "oh man"
-foo 2 3
-foo 4 5
+print (foo 2 3)
+print (foo 4 5)
