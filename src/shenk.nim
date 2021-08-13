@@ -1,11 +1,13 @@
 # Driver for Shenk mini-language
 
 import os
-# import sequtils
+import sequtils
 import strutils
+import tables
 
 import logger
 import shiv_lexer
+import stack
 
 #-------------------------------------------------------------------------------
 # Shenk AST
@@ -34,8 +36,6 @@ type
     case kind: StmtKind
     of stCall:
       ex: Expr
-    else:
-      discard
 
   Func = object
     name: string
@@ -224,6 +224,104 @@ proc parseProgram*(input: string): Ast =
   parser.log "Done"
 
 #-------------------------------------------------------------------------------
+# Shenk Interpreter
+
+type
+  ValueKind = enum
+    tyVoid
+    tyNum
+    tyStr
+  Value = object
+    case kind: ValueKind
+    of tyVoid:
+      discard
+    of tyNum:
+      num: float
+    of tyStr:
+      str: string
+
+  Scope = Table[string, Value]
+
+  Interpreter = object
+    ast: Ast
+    scopes: Stack[Scope]
+
+    # easy lookup for funcs
+    funcs: Table[string, Func]
+
+func toString(val: Value): string =
+  case val.kind
+  of tyVoid:
+    "<void>"
+  of tyNum:
+    $val.num
+  of tyStr:
+    val.str
+
+func newInterpreter(ast: Ast): Interpreter =
+  result.ast = ast
+  # initialize a global scope
+  result.scopes.push(Scope())
+  for fn in ast.funcs:
+    result.funcs[fn.name] = fn
+
+proc lookup(ctx: var Interpreter, name: string): var Value =
+  ctx.scopes.top()[name]
+
+proc exec(ctx: var Interpreter, st: Stmt)
+proc eval(ctx: var Interpreter, fn: Func, args: seq[Value]): Value =
+  # set up function scope
+  let nargs = fn.args.len
+  assert nargs == args.len
+  var scope = Scope()
+  for i in 0..<nargs:
+    scope[fn.args[i]] = args[i]
+  ctx.scopes.push(scope)
+
+  for st in fn.body:
+    ctx.exec(st)
+  discard ctx.scopes.pop()
+
+proc eval(ctx: var Interpreter, ex: Expr): Value =
+  case ex.kind
+  of exNumber:
+    Value(kind: tyNum, num: ex.num)
+  of exString:
+    Value(kind: tyStr, str: ex.str)
+  of exIdentifier:
+    ctx.lookup(ex.name)
+  of exCall:
+    let args = ex.args.mapIt(ctx.eval(it))
+    case ex.callee
+    # builtins!
+    of "print":
+      var feefs = ""
+      for arg in args:
+        feefs &= toString(arg)
+      echo feefs
+      Value(kind: tyVoid)
+    of "+":
+      assert args.len == 2
+      Value(kind: tyNum, num: args[0].num + args[1].num)
+    of "return":
+      # todo
+      Value(kind: tyVoid)
+    else:
+      # user funcs
+      let fn = ctx.funcs[ex.callee]
+      ctx.eval(fn, args)
+
+proc exec(ctx: var Interpreter, st: Stmt) =
+  case st.kind
+  of stCall:
+    discard ctx.eval(st.ex)
+
+proc interpret(ast: Ast) =
+  var ctx = newInterpreter(ast)
+  for st in ctx.ast.stmts:
+    ctx.exec(st)
+
+#-------------------------------------------------------------------------------
 # Arg parser
 
 type
@@ -290,6 +388,8 @@ proc doCompile(opt: Options): int =
   # var ast = parseProgram(sexpr)
   var ast = parseProgram(contents)
   pprint(log, ast)
+
+  interpret(ast)
 
   return 0
 
