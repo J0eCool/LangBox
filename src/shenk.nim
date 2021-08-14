@@ -1,7 +1,8 @@
 # Driver for Shenk mini-language
 
+import algorithm
 import os
-import sequtils
+# import sequtils
 import strutils
 import tables
 
@@ -69,8 +70,6 @@ proc pretty(st: Stmt): string =
   of stReturn:
     "Return " & st.ex.pretty()
 
-proc pprint(log: Logger, st: Stmt) =
-  log st.pretty()
 proc pprint(log: Logger, fn: Func) =
   log "Func ", fn.name
   var args = ""
@@ -342,10 +341,41 @@ proc run(ctx: var Interpreter) =
 
     let instr = cur.instrs[cur.pc]
     cur.pc += 1
+    ctx.log "running: ", instr
     case instr.kind
-    else:
-      # todo
-      discard
+    of iValue:
+      cur.vals.push(instr.val)
+    of iLoad:
+      cur.vals.push(ctx.lookup(instr.name))
+    of iCall:
+      var args: seq[Value]
+      assert cur.vals.len >= instr.nargs
+      for _ in 0..<instr.nargs:
+        args.add cur.vals.pop()
+      reverse(args)
+      case instr.callee
+      # builtins
+      of "print":
+        var line = ""
+        for arg in args:
+          line &= toString(arg)
+        echo line
+      of "+":
+        assert instr.nargs == 2
+        cur.vals.push(Value(kind: tyNum, num: args[0].num + args[1].num))
+      else:
+        # user funcs
+        let fn = ctx.funcs[instr.callee]
+        assert fn.args.len == instr.nargs
+        var scope: Scope
+        scope.instrs = fn.instrs
+        for i in 0..<instr.nargs:
+          scope.vars[fn.args[i]] = args[i]
+        ctx.scopes.push(scope)
+    of iReturn:
+      let ret = cur.vals.pop()
+      discard ctx.scopes.pop()
+      ctx.scopes.top().vals.push(ret)
 
 proc interpret(ast: Ast) =
   var ctx = newInterpreter(ast)
