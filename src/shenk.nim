@@ -45,7 +45,6 @@ type
 
   Ast = object
     funcs: seq[Func]
-    stmts: seq[Stmt]
 
 #-------------------------------------------------------------------------------
 # Shenk AST pretty-printer
@@ -89,11 +88,6 @@ proc pprint(log: Logger, ast: Ast) =
   log ""
   for fn in ast.funcs:
     pprint(log, fn)
-  log ""
-  log "Top-level statements"
-  log ""
-  for st in ast.stmts:
-    pprint(log, st)
 
 #-------------------------------------------------------------------------------
 # Shenk parser
@@ -223,13 +217,15 @@ proc parseProgram*(input: string): Ast =
   var parser = Parser(tokens: tokens, log: logger("parser"))
 
   parser.blankLines()
+  var topLevelStmts: seq[Stmt]
   while not parser.isDone():
     parser.log "top level: ", parser.peek()
     if parser.nextIs("fn"):
       result.funcs.add parser.function()
     else:
-      result.stmts.add parser.stmt()
+      topLevelStmts.add parser.stmt()
     parser.blankLines()
+  result.funcs.add Func(name: "_main", body: topLevelStmts)
 
   parser.log "Done"
 
@@ -331,8 +327,7 @@ proc exec(ctx: var Interpreter, st: Stmt) =
 
 proc interpret(ast: Ast) =
   var ctx = newInterpreter(ast)
-  for st in ctx.ast.stmts:
-    ctx.exec(st)
+  discard ctx.eval(ctx.funcs["_main"], @[])
 
 #-------------------------------------------------------------------------------
 # Arg parser
