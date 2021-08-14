@@ -246,17 +246,42 @@ type
     of tyStr:
       str: string
 
-  Scope = Table[string, Value]
+  InstrKind = enum
+    iValue
+    iLoad
+    iCall
+    iReturn
+  Instr = object
+    case kind: InstrKind
+    of iValue:
+      val: Value
+    of iLoad:
+      name: string
+    of iCall:
+      callee: string
+      nargs: int
+    else:
+      # todo
+      discard
+
+  # codegen'd function
+  IFunc = object
+    name: string
+    args: seq[string]
+    instrs: seq[Instr]
+
+  Scope = object
+    instrs: seq[Instr]
+    pc: int
+    vars: Table[string, Value]
+    vals: Stack[Value]
 
   Interpreter = object
-    ast: Ast
-    # easy lookup for funcs
-    funcs: Table[string, Func]
+    log: Logger
+    funcs: Table[string, IFunc]
 
     # Runtime state
     scopes: Stack[Scope]
-    retVal: Value
-    toExec: Stack[seq[Stmt]]
 
 func toString(val: Value): string =
   case val.kind
@@ -267,67 +292,68 @@ func toString(val: Value): string =
   of tyStr:
     val.str
 
-func newInterpreter(ast: Ast): Interpreter =
-  result.ast = ast
-  # initialize a global scope
-  result.scopes.push(Scope())
-  for fn in ast.funcs:
-    result.funcs[fn.name] = fn
+# Bytecode generation
 
-proc lookup(ctx: var Interpreter, name: string): var Value =
-  ctx.scopes.top()[name]
-
-proc exec(ctx: var Interpreter, st: Stmt)
-proc eval(ctx: var Interpreter, fn: Func, args: seq[Value]): Value =
-  # set up function scope
-  let nargs = fn.args.len
-  assert nargs == args.len
-  var scope = Scope()
-  for i in 0..<nargs:
-    scope[fn.args[i]] = args[i]
-  ctx.scopes.push(scope)
-
-  for st in fn.body:
-    ctx.exec(st)
-  discard ctx.scopes.pop()
-
-proc eval(ctx: var Interpreter, ex: Expr): Value =
+proc codegen(ex: Expr): seq[Instr] =
   case ex.kind
   of exNumber:
-    Value(kind: tyNum, num: ex.num)
+    result.add Instr(kind: iValue, val: Value(kind: tyNum, num: ex.num))
   of exString:
-    Value(kind: tyStr, str: ex.str)
+    result.add Instr(kind: iValue, val: Value(kind: tyStr, str: ex.str))
   of exIdentifier:
-    ctx.lookup(ex.name)
+    result.add Instr(kind: iLoad, name: ex.name)
   of exCall:
-    let args = ex.args.mapIt(ctx.eval(it))
-    case ex.callee
-    # builtins!
-    of "print":
-      var feefs = ""
-      for arg in args:
-        feefs &= toString(arg)
-      echo feefs
-      Value(kind: tyVoid)
-    of "+":
-      assert args.len == 2
-      Value(kind: tyNum, num: args[0].num + args[1].num)
-    else:
-      # user funcs
-      let fn = ctx.funcs[ex.callee]
-      ctx.eval(fn, args)
+    for arg in ex.args:
+      result &= codegen(arg)
+    result.add Instr(kind: iCall, callee: ex.callee, nargs: ex.args.len)
 
-proc exec(ctx: var Interpreter, st: Stmt) =
+proc codegen(st: Stmt): seq[Instr] =
   case st.kind
   of stCall:
-    discard ctx.eval(st.ex)
+    codegen(st.ex)
   of stReturn:
-    # todo
-    discard ctx.eval(st.ex)
+    codegen(st.ex) & @[Instr(kind: iReturn)]
+
+proc codegen(fn: Func): IFunc =
+  result.name = fn.name
+  result.args = fn.args
+  for st in fn.body:
+    result.instrs &= codegen(st)
+
+proc newInterpreter(ast: Ast): Interpreter =
+  result.log = logger("interpreter")
+  for fn in ast.funcs:
+    let f = codegen(fn)
+    result.funcs[fn.name] = f
+    result.log f.name
+    for instr in f.instrs:
+      result.log instr
+
+proc lookup(ctx: var Interpreter, name: string): var Value =
+  # todo: also check global scope
+  ctx.scopes.top().vars[name]
+
+proc run(ctx: var Interpreter) =
+  while ctx.scopes.len > 0:
+    let cur = addr ctx.scopes.top()
+    if cur.pc >= cur.instrs.len:
+      discard ctx.scopes.pop()
+      continue
+
+    let instr = cur.instrs[cur.pc]
+    cur.pc += 1
+    case instr.kind
+    else:
+      # todo
+      discard
 
 proc interpret(ast: Ast) =
   var ctx = newInterpreter(ast)
-  discard ctx.eval(ctx.funcs["_main"], @[])
+  var globalScope: Scope
+  globalScope.instrs.add Instr(kind: iCall, callee: "_main", nargs: 0)
+  ctx.scopes.push(globalScope)
+
+  ctx.run()
 
 #-------------------------------------------------------------------------------
 # Arg parser
@@ -385,15 +411,6 @@ proc doCompile(opt: Options): int =
       file.writeLine($token)
     file.close()
 
-  # log "Parsing Sexprs..."
-  # var sexpr = parse(contents)
-  # if opt.debug:
-  #   let file = open(tempDir / "debug_parse_sexpr.shv", fmWrite)
-  #   for elem in sexpr.elems:
-  #     file.writeLine(pretty(elem))
-  #   file.close()
-
-  # var ast = parseProgram(sexpr)
   var ast = parseProgram(contents)
   pprint(log, ast)
 

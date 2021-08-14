@@ -8,11 +8,9 @@
             "type": "shell",
             "command": "nim c -r -o:out/test test/test_parser.nim",
             "problemMatcher": [],
-            "group": {
-                "kind": "build",
-                "isDefault": true
-            }
-        }, {
+            "group": "build"
+        },
+        {
             "label": "Shenk",
             "type": "shell",
             "command": "nim c -r -o:out/shenk src/shenk.nim -- programs/simple.shnk",
