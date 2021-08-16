@@ -34,10 +34,14 @@ type
   StmtKind = enum
     stCall
     stReturn
+    stIf
   Stmt = object
     case kind: StmtKind
     of stCall, stReturn:
       ex: Expr
+    of stIf:
+      cond: Expr
+      body: seq[Stmt]
 
   Func = object
     name: string
@@ -50,6 +54,7 @@ type
 #-------------------------------------------------------------------------------
 # Shenk AST pretty-printer
 
+const tabStr = "  "
 proc pretty(ex: Expr): string =
   case ex.kind
   of exNumber:
@@ -66,9 +71,15 @@ proc pretty(ex: Expr): string =
 proc pretty(st: Stmt): string =
   case st.kind
   of stCall:
-    "Call " & st.ex.pretty()
+    result = "Call " & st.ex.pretty()
   of stReturn:
-    "Return " & st.ex.pretty()
+    result = "Return " & st.ex.pretty()
+  of stIf:
+    result = "If\n" &
+      tabStr & "Cond " & st.cond.pretty() & "\n" &
+      tabStr & "Body"
+    for s in st.body:
+      result &= "\n" & tabStr.repeat(2) & s.pretty()
 
 proc pprint(log: Logger, fn: Func) =
   log "Func ", fn.name
@@ -185,14 +196,22 @@ proc callExpr(parser: var Parser): Expr =
     args.add parser.expr()
   Expr(kind: exCall, callee: callee, args: args)
 
+proc stmtList(parser: var Parser): seq[Stmt]
 proc stmt(parser: var Parser): Stmt =
   if parser.nextIs(tIdentifier):
     case parser.peek().value
     of "return":
       discard parser.pop()
-      return Stmt(kind: stReturn, ex: parser.callExpr())
+      return Stmt(kind: stReturn, ex: parser.expr())
+    of "if":
+      discard parser.pop()
+      let cond = parser.expr()
+      let body = parser.stmtList()
+      return Stmt(kind: stIf, cond: cond, body: body)
   Stmt(kind: stCall, ex: parser.callExpr())
+
 proc stmtList(parser: var Parser): seq[Stmt] =
+  parser.space()
   parser.expect(openBrace(bCurly))
   parser.newline()
   while true:
@@ -236,6 +255,7 @@ type
     tyVoid
     tyNum
     tyStr
+    tyBool
   Value = object
     case kind: ValueKind
     of tyVoid:
@@ -244,12 +264,15 @@ type
       num: float
     of tyStr:
       str: string
+    of tyBool:
+      flag: bool
 
   InstrKind = enum
     iValue
     iLoad
     iCall
     iReturn
+    iJumpIf
   Instr = object
     case kind: InstrKind
     of iValue:
@@ -259,8 +282,9 @@ type
     of iCall:
       callee: string
       nargs: int
-    else:
-      # todo
+    of iJumpIf:
+      dest: int
+    of iReturn:
       discard
 
   # codegen'd function
@@ -290,6 +314,8 @@ func toString(val: Value): string =
     $val.num
   of tyStr:
     val.str
+  of tyBool:
+    $val.flag
 
 # Bytecode generation
 
@@ -306,18 +332,27 @@ proc codegen(ex: Expr): seq[Instr] =
       result &= codegen(arg)
     result.add Instr(kind: iCall, callee: ex.callee, nargs: ex.args.len)
 
+proc codegen(stmts: seq[Stmt]): seq[Instr]
 proc codegen(st: Stmt): seq[Instr] =
   case st.kind
   of stCall:
-    codegen(st.ex)
+    result = codegen(st.ex)
   of stReturn:
-    codegen(st.ex) & @[Instr(kind: iReturn)]
+    result = codegen(st.ex) & @[Instr(kind: iReturn)]
+  of stIf:
+    let body = codegen(st.body)
+    result = codegen(st.cond) & @[
+      Instr(kind: iCall, callee: "not", nargs: 1),
+      Instr(kind: iJumpIf, dest: body.len),
+    ] & body
+proc codegen(stmts: seq[Stmt]): seq[Instr] =
+  for st in stmts:
+    result &= codegen(st)
 
 proc codegen(fn: Func): IFunc =
   result.name = fn.name
   result.args = fn.args
-  for st in fn.body:
-    result.instrs &= codegen(st)
+  result.instrs = codegen(fn.body)
 
 proc newInterpreter(ast: Ast): Interpreter =
   result.log = logger("interpreter")
@@ -362,7 +397,23 @@ proc run(ctx: var Interpreter) =
         echo line
       of "+":
         assert instr.nargs == 2
+        assert args[0].kind == tyNum
+        assert args[1].kind == tyNum
         cur.vals.push(Value(kind: tyNum, num: args[0].num + args[1].num))
+      of "-":
+        assert instr.nargs == 2
+        assert args[0].kind == tyNum
+        assert args[1].kind == tyNum
+        cur.vals.push(Value(kind: tyNum, num: args[0].num - args[1].num))
+      of "<":
+        assert instr.nargs == 2
+        assert args[0].kind == tyNum
+        assert args[1].kind == tyNum
+        cur.vals.push(Value(kind: tyBool, flag: args[0].num < args[1].num))
+      of "not":
+        assert instr.nargs == 1
+        assert args[0].kind == tyBool
+        cur.vals.push(Value(kind: tyBool, flag: not args[0].flag))
       else:
         # user funcs
         let fn = ctx.funcs[instr.callee]
@@ -376,6 +427,11 @@ proc run(ctx: var Interpreter) =
       let ret = cur.vals.pop()
       discard ctx.scopes.pop()
       ctx.scopes.top().vals.push(ret)
+    of iJumpIf:
+      let cond = cur.vals.pop()
+      assert cond.kind == tyBool
+      if cond.flag:
+        cur.pc += instr.dest
 
 proc interpret(ast: Ast) =
   var ctx = newInterpreter(ast)
