@@ -14,10 +14,6 @@ print "oh man"
 print (foo 2 3)
 print (foo 4 5)
 
-print "fib 1: " (fib 1)
-print "fib 2: " (fib 2)
-print "fib 3: " (fib 3)
-print "fib 4: " (fib 4)
-print "fib 5: " (fib 5)
-print "fib 6: " (fib 6)
-print "fib 7: " (fib 7)
+range i 0 10 {
+    print "fib " i ": " (fib i)
+}

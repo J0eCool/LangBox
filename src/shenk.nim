@@ -35,13 +35,18 @@ type
     stCall
     stReturn
     stIf
+    stRange
   Stmt = object
     case kind: StmtKind
     of stCall, stReturn:
       ex: Expr
     of stIf:
       cond: Expr
-      body: seq[Stmt]
+      ifTrue: seq[Stmt]
+    of stRange:
+      rangeName: string
+      lo, hi: Expr
+      rangeBody: seq[Stmt]
 
   Func = object
     name: string
@@ -68,6 +73,7 @@ proc pretty(ex: Expr): string =
     for arg in ex.args:
       args &= " " & arg.pretty()
     "(" & ex.callee & args & ")"
+proc pretty(stmts: seq[Stmt]): string
 proc pretty(st: Stmt): string =
   case st.kind
   of stCall:
@@ -77,8 +83,13 @@ proc pretty(st: Stmt): string =
   of stIf:
     result = "If\n" &
       tabStr & "Cond " & st.cond.pretty() & "\n" &
-      tabStr & "Body"
-    for s in st.body:
+      tabStr & "True" & st.ifTrue.pretty()
+  of stRange:
+    result = "Range\n" &
+      tabStr & "Iterator " & st.rangeName & "\n" &
+      tabStr & "Body" & st.rangeBody.pretty()
+proc pretty(stmts: seq[Stmt]): string =
+    for s in stmts:
       result &= "\n" & tabStr.repeat(2) & s.pretty()
 
 proc pprint(log: Logger, fn: Func) =
@@ -109,8 +120,16 @@ type
     log: Logger
 
 proc error(parser: Parser, args: varargs[string, `$`]) =
-  parser.log "[Parse Error]: ", args.join("")
-  echo "[Parse Error]: ", args.join("")
+  var str = "[Parse Error]: " & args.join("")
+  # dump current state
+  let ctx = 4
+  for i in -ctx..ctx:
+    let j = i + parser.index
+    if j >= 0 and j < parser.tokens.len:
+      str &= (if i == 0: "\n>>>>" else: "\n    ")
+      str &= $parser.tokens[j]
+  parser.log str
+  echo str
   quit(1)
 proc errorIf(parser: Parser, cond: bool, args: varargs[string, `$`]) =
   if cond:
@@ -120,8 +139,9 @@ func peek(parser: Parser): Token =
   parser.tokens[parser.index]
 proc pop(parser: var Parser): Token =
   result = parser.peek()
-  parser.log "popping ", result
   parser.index += 1
+proc rewindTo(parser: var Parser, idx: int) =
+  parser.index = idx
 
 # consumes token that is expected to be there
 proc expect(parser: var Parser, val: string) =
@@ -199,15 +219,22 @@ proc callExpr(parser: var Parser): Expr =
 proc stmtList(parser: var Parser): seq[Stmt]
 proc stmt(parser: var Parser): Stmt =
   if parser.nextIs(tIdentifier):
-    case parser.peek().value
+    let savedIndex = parser.index
+    case parser.pop().value
     of "return":
-      discard parser.pop()
       return Stmt(kind: stReturn, ex: parser.expr())
     of "if":
-      discard parser.pop()
       let cond = parser.expr()
+      let ifTrue = parser.stmtList()
+      return Stmt(kind: stIf, cond: cond, ifTrue: ifTrue)
+    of "range":
+      let name = parser.identifier()
+      let lo = parser.expr()
+      let hi = parser.expr()
       let body = parser.stmtList()
-      return Stmt(kind: stIf, cond: cond, body: body)
+      return Stmt(kind: stRange, rangeName: name, lo: lo, hi: hi, rangeBody: body)
+    # unpop the last token if no builtin stmt match; saves needing to `discard parser.pop()` for each case
+    parser.rewindTo(savedIndex)
   Stmt(kind: stCall, ex: parser.callExpr())
 
 proc stmtList(parser: var Parser): seq[Stmt] =
@@ -269,20 +296,23 @@ type
 
   InstrKind = enum
     iValue
+    iVar
     iLoad
+    iStore
     iCall
     iReturn
+    iJump
     iJumpIf
   Instr = object
     case kind: InstrKind
     of iValue:
       val: Value
-    of iLoad:
+    of iVar, iLoad, iStore:
       name: string
     of iCall:
       callee: string
       nargs: int
-    of iJumpIf:
+    of iJump, iJumpIf:
       dest: int
     of iReturn:
       discard
@@ -305,6 +335,20 @@ type
 
     # Runtime state
     scopes: Stack[Scope]
+
+# convenience funcs to build instrs
+func instValue(val: float): Instr =
+  Instr(kind: iValue, val: Value(kind: tyNum, num: val))
+# func instValue(val: string): Instr =
+#   Instr(kind: iValue, val: Value(kind: tyStr, str: val))
+func instVar(name: string): Instr =
+  Instr(kind: iVar, name: name)
+func instLoad(name: string): Instr =
+  Instr(kind: iLoad, name: name)
+func instStore(name: string): Instr =
+  Instr(kind: iStore, name: name)
+func instCall(callee: string, nargs: int): Instr =
+  Instr(kind: iCall, callee: callee, nargs: nargs)
 
 func toString(val: Value): string =
   case val.kind
@@ -340,11 +384,38 @@ proc codegen(st: Stmt): seq[Instr] =
   of stReturn:
     result = codegen(st.ex) & @[Instr(kind: iReturn)]
   of stIf:
-    let body = codegen(st.body)
+    let ifTrue = codegen(st.ifTrue)
     result = codegen(st.cond) & @[
-      Instr(kind: iCall, callee: "not", nargs: 1),
-      Instr(kind: iJumpIf, dest: body.len),
-    ] & body
+      instCall("not", 1),
+      Instr(kind: iJumpIf, dest: ifTrue.len),
+    ] & ifTrue
+  of stRange:
+    # initialize the range var with the lo expr
+    result = codegen(st.lo) & @[instVar(st.rangeName)]
+    # compute the hi expr once at the start of the loop
+    # todo: unique the name to allow nested ranges
+    let endName = "_rangeEnd"
+    result &= codegen(st.hi) & @[instVar(endName)]
+
+    let body = codegen(st.rangeBody)
+    const preLen = 4
+    const postLen = 5
+    result &= @[
+      # test if the loop is done, if so skip over the body + postamble
+      instLoad(endName),
+      instLoad(st.rangeName),
+      instCall("<", 2),
+      Instr(kind: iJumpIf, dest: body.len + postLen),
+    ]
+    result &= body
+    result &= @[
+      # increment the iterator and return to the top of the loop
+      instLoad(st.rangeName),
+      instValue(1),
+      instCall("+", 2),
+      instStore(st.rangeName),
+      Instr(kind: iJump, dest: -body.len - postLen - preLen),
+    ]
 proc codegen(stmts: seq[Stmt]): seq[Instr] =
   for st in stmts:
     result &= codegen(st)
@@ -380,8 +451,12 @@ proc run(ctx: var Interpreter) =
     case instr.kind
     of iValue:
       cur.vals.push(instr.val)
+    of iVar:
+      cur.vars[instr.name] = cur.vals.pop()
     of iLoad:
       cur.vals.push(ctx.lookup(instr.name))
+    of iStore:
+      ctx.lookup(instr.name) = cur.vals.pop()
     of iCall:
       var args: seq[Value]
       assert cur.vals.len >= instr.nargs
@@ -427,6 +502,8 @@ proc run(ctx: var Interpreter) =
       let ret = cur.vals.pop()
       discard ctx.scopes.pop()
       ctx.scopes.top().vals.push(ret)
+    of iJump:
+      cur.pc += instr.dest
     of iJumpIf:
       let cond = cur.vals.pop()
       assert cond.kind == tyBool
