@@ -1,0 +1,19 @@
+To Do
+================================================================================
+
+Backlog
+================================================================================
+- static typing
+    - need to figure out type annotation syntax
+- type inference
+    - maybe don't need type annotation at all!? just always infer it!
+- validate function calls
+    - need to refactor builtins to be testable
+- arrays
+- some sort of more-complex data structures; user-defined types
+
+Wild Ideas
+================================================================================
+- Side-effecting functions must return Void, pure functions can return values
+- module system that parameterizes modules over undeclared symbols
+    - takes out-of-order definitions to an extreme
