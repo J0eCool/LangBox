@@ -14,6 +14,17 @@ Backlog
 
 Wild Ideas
 ================================================================================
+- What would be the perfect language to write a compiler in?
+    - Design THAT. From there, you can make other languages more quickly
+    - It should be Racket. Why isn't it? I should try learning Racket I think
+- !! Entire AST of the program is available at runtime
+    - multiple entry points? in an Erlang-style model, no need for a single Main,
+      can just immediately spin up N actors by saying "I should run from the start"
+        - can emulate *that* in a single thread without a synchronization primitive,
+          by making the threads "virtual", either in interpreter or some runtime
+          construct
+    - can always dump the current state of the program?? if everything lives in
+      the AST
 - Side-effecting functions must return Void, pure functions can return values
 - module system that parameterizes modules over undeclared symbols
     - takes out-of-order definitions to an extreme
